@@ -1,0 +1,39 @@
+#!/bin/bash
+
+sudo microk8s.reset
+
+sudo microk8s.start
+sudo microk8s.enable dns dashboard storage gpu registry
+sudo microk8s.enable helm
+
+sudo microk8s.kubectl config view --raw > $HOME/.kube/config
+
+# workaround do to broken helm config with kubernetes v 1.16
+sudo microk8s.helm init --wait --output yaml | sed 's@apiVersion: extensions/v1beta1@apiVersion: apps/v1@' | sed 's@  replicas: 1@  replicas: 1\n  selector: {"matchLabels": {"app": "helm", "name": "tiller"}}@' | sudo microk8s.kubectl apply -f -
+
+echo Resting 10s
+sleep 10
+
+# Add loadbalancer
+sudo microk8s.helm install --name metallb --namespace metallb-system --wait stable/metallb
+sudo microk8s.kubectl apply -f metallb-config.yaml
+
+# Install ksonnet
+#wget -O ks_0.13.1_linux_amd64.tar.gz https://github.com/ksonnet/ksonnet/releases/download/v0.13.1/ks_0.13.1_linux_amd64.tar.gz
+#tar -zxvf ./ks_0.13.1_linux_amd64.tar.gz
+#sudo cp ks_0.13.1_linux_amd64/ks /usr/bin
+
+# Install kubeflow
+rm -rf kfctl kubeflow-dev
+
+export PATH=$PATH:$PWD
+export KFAPP=kubeflow-dev
+wget -O kfctl_v0.6.2_linux.tar_gz https://github.com/kubeflow/kubeflow/releases/download/v0.6.2/kfctl_v0.6.2_linux.tar.gz && tar -zvxf kfctl_v0.6.2_linux.tar.gz
+
+export CONFIG=$PWD/kfctl_k8s_istio.yaml  #"https://raw.githubusercontent.com/kubeflow/kubeflow/${VERSION}/bootstrap/config/kfctl_k8s_istio.yaml"
+kfctl init ${KFAPP} --config=${CONFIG} -V
+cd ${KFAPP}
+
+kfctl generate k8s -V
+kfctl apply k8s -V
+
